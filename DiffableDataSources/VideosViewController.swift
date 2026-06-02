@@ -29,17 +29,16 @@
 import UIKit
 import SafariServices
 
-typealias data
+typealias DataSource = UICollectionViewDiffableDataSource<Section, Video>
+typealias Snapshot = NSDiffableDataSourceSnapshot<Section, Video>
 
 class VideosViewController: UICollectionViewController {
   // MARK: - Properties
-  private var videoList = Video.allVideos
-  enum Section {
-    case main
-  }
+  private var sections = Section.allSections
   private var searchController = UISearchController(searchResultsController: nil)
   
   // MARK: - Value Types
+  private lazy var dataSource = configureDataSource()
   
   // MARK: - Life Cycles
   override func viewDidLoad() {
@@ -47,30 +46,46 @@ class VideosViewController: UICollectionViewController {
     view.backgroundColor = .white
     configureSearchController()
     configureLayout()
+    applySnapshot()
   }
   
   // MARK: - Functions
-}
-
-// MARK: - UICollectionViewDataSource
-extension VideosViewController {
-  override func collectionView(
-    _ collectionView: UICollectionView,
-    numberOfItemsInSection section: Int
-  ) -> Int {
-    return videoList.count
+  private func applySnapshot(animate: Bool = true) {
+    var snapshot = Snapshot()
+    snapshot.appendSections(sections)
+    sections.forEach { section in
+      snapshot.appendItems(section.videos, toSection: section)
+    }
+    dataSource.apply(snapshot, animatingDifferences: animate)
   }
   
-  override func collectionView(
-    _ collectionView: UICollectionView,
-    cellForItemAt indexPath: IndexPath
-  ) -> UICollectionViewCell {
-    let video = videoList[indexPath.row]
-    guard let cell = collectionView.dequeueReusableCell(
-      withReuseIdentifier: "VideoCollectionViewCell",
-      for: indexPath) as? VideoCollectionViewCell else { fatalError() }
-    cell.video = video
-    return cell
+  private func configureDataSource() -> DataSource {
+    let dataSource = DataSource(collectionView: collectionView) {
+      collectionView, indexPath, video -> UICollectionViewCell? in
+      let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "VideoCollectionViewCell", for: indexPath)
+      as? VideoCollectionViewCell
+      cell?.video = video
+      
+      return cell
+    }
+    
+    dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+      guard kind == UICollectionView.elementKindSectionHeader else {
+        return nil
+      }
+
+      let view = collectionView.dequeueReusableSupplementaryView(
+        ofKind: kind,
+        withReuseIdentifier: SectionHeaderReusableView.reuseIdentfier,
+        for: indexPath) as? SectionHeaderReusableView
+
+      let section = self.dataSource.snapshot().sectionIdentifiers[indexPath.section]
+      view?.titleLabel.text = section.title
+      
+      return view
+    }
+    
+    return dataSource
   }
 }
 
@@ -80,7 +95,7 @@ extension VideosViewController {
     _ collectionView: UICollectionView,
     didSelectItemAt indexPath: IndexPath
   ) {
-    let video = videoList[indexPath.row]
+    guard let video = dataSource.itemIdentifier(for: indexPath) else { return }
     guard let link = video.link else {
       print("Invalid link")
       return
@@ -93,8 +108,8 @@ extension VideosViewController {
 // MARK: - UISearchResultsUpdating Delegate
 extension VideosViewController: UISearchResultsUpdating {
   func updateSearchResults(for searchController: UISearchController) {
-    videoList = filteredVideos(for: searchController.searchBar.text)
-    collectionView.reloadData()
+    sections = filteredSections(for: searchController.searchBar.text)
+    applySnapshot()
   }
   
   func filteredVideos(for queryOrNil: String?) -> [Video] {
@@ -110,6 +125,24 @@ extension VideosViewController: UISearchResultsUpdating {
     }
   }
   
+  func filteredSections(for queryOrNil: String?) -> [Section] {
+    let sections = Section.allSections
+    
+    guard let queryOrNil, !queryOrNil.isEmpty else { return sections }
+    
+    return sections.filter { section in
+      var matches = section.title.lowercased().contains(queryOrNil.lowercased())
+      for video in section.videos {
+        if video.title.lowercased().contains(queryOrNil.lowercased()) {
+          matches = true
+          break
+        }
+      }
+      
+      return matches
+    }
+  }
+  
   func configureSearchController() {
     searchController.searchResultsUpdater = self
     searchController.obscuresBackgroundDuringPresentation = false
@@ -122,6 +155,12 @@ extension VideosViewController: UISearchResultsUpdating {
 // MARK: - Layout Handling
 extension VideosViewController {
   private func configureLayout() {
+    collectionView.register(
+      SectionHeaderReusableView.self,
+      forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+      withReuseIdentifier: SectionHeaderReusableView.reuseIdentfier
+    )
+    
     collectionView.collectionViewLayout = UICollectionViewCompositionalLayout(sectionProvider: { (sectionIndex, layoutEnvironment) -> NSCollectionLayoutSection? in
       let isPhone = layoutEnvironment.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiom.phone
       let size = NSCollectionLayoutSize(
@@ -134,6 +173,18 @@ extension VideosViewController {
       let section = NSCollectionLayoutSection(group: group)
       section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
       section.interGroupSpacing = 10
+      
+      let headerFooterSize = NSCollectionLayoutSize(
+        widthDimension: .fractionalWidth(1.0),
+        heightDimension: .estimated(20)
+      )
+      let sectionHeader = NSCollectionLayoutBoundarySupplementaryItem(
+        layoutSize: headerFooterSize,
+        elementKind: UICollectionView.elementKindSectionHeader,
+        alignment: .top
+      )
+      section.boundarySupplementaryItems = [sectionHeader]
+      
       return section
     })
   }
