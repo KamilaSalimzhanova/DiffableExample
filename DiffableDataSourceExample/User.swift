@@ -8,6 +8,6 @@
 import Foundation
 
 struct User: Hashable, Sendable {
-    let id: UUID
+    let id: UUID = UUID()
     let name: String
 }
